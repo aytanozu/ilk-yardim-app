@@ -43,7 +43,8 @@ enum EmergencyStatus {
   open,
   accepted,
   resolved,
-  cancelled;
+  cancelled,
+  expired;
 
   static EmergencyStatus fromKey(String? key) {
     switch (key) {
@@ -53,11 +54,18 @@ enum EmergencyStatus {
         return EmergencyStatus.resolved;
       case 'cancelled':
         return EmergencyStatus.cancelled;
+      case 'expired':
+        return EmergencyStatus.expired;
       case 'open':
       default:
         return EmergencyStatus.open;
     }
   }
+
+  bool get isClosed =>
+      this == EmergencyStatus.resolved ||
+      this == EmergencyStatus.cancelled ||
+      this == EmergencyStatus.expired;
 }
 
 class EmergencyCase extends Equatable {
@@ -75,10 +83,16 @@ class EmergencyCase extends Equatable {
     this.patient,
     this.contactPhone,
     this.hazards = const [],
-    this.acceptedBy,
+    this.acceptedBy = const [],
     this.acceptedAt,
+    this.arrivedAt,
+    this.arrivedBy,
     this.resolvedAt,
+    this.closedAt,
+    this.closedBy,
+    this.closeReason,
     this.waveLevel = 0,
+    this.acceptDeadline,
   });
 
   final String id;
@@ -94,10 +108,19 @@ class EmergencyCase extends Equatable {
   final PatientInfo? patient;
   final String? contactPhone;
   final List<String> hazards;
-  final String? acceptedBy;
+  final List<String> acceptedBy;
   final DateTime? acceptedAt;
+  final DateTime? arrivedAt;
+  final String? arrivedBy;
   final DateTime? resolvedAt;
+  final DateTime? closedAt;
+  final String? closedBy;
+  final String? closeReason;
   final int waveLevel;
+  /// Deadline by which at least one accept must arrive — otherwise the
+  /// scheduled escalator advances to the next wave. Server sets this on
+  /// each wave push. Drives the mobile countdown ring.
+  final DateTime? acceptDeadline;
 
   factory EmergencyCase.fromSnapshot(
     DocumentSnapshot<Map<String, dynamic>> doc,
@@ -122,14 +145,28 @@ class EmergencyCase extends Equatable {
               Map<String, dynamic>.from(data['patient'] as Map)),
       contactPhone: data['contactPhone'] as String?,
       hazards: (data['hazards'] as List?)?.cast<String>() ?? const [],
-      acceptedBy: data['acceptedBy'] as String?,
+      acceptedBy: _readAcceptedBy(data['acceptedBy']),
       acceptedAt: (data['acceptedAt'] as Timestamp?)?.toDate(),
+      arrivedAt: (data['arrivedAt'] as Timestamp?)?.toDate(),
+      arrivedBy: data['arrivedBy'] as String?,
       resolvedAt: (data['resolvedAt'] as Timestamp?)?.toDate(),
+      closedAt: (data['closedAt'] as Timestamp?)?.toDate(),
+      closedBy: data['closedBy'] as String?,
+      closeReason: data['closeReason'] as String?,
       waveLevel: (data['waveLevel'] as num?)?.toInt() ?? 0,
+      acceptDeadline: (data['acceptDeadline'] as Timestamp?)?.toDate(),
     );
   }
 
+  static List<String> _readAcceptedBy(dynamic raw) {
+    if (raw is List) return raw.cast<String>();
+    if (raw is String && raw.isNotEmpty) return [raw];
+    return const [];
+  }
+
   bool get isOpen => status == EmergencyStatus.open;
+  bool get isActive => !status.isClosed;
+  bool isAcceptedBy(String uid) => acceptedBy.contains(uid);
 
   @override
   List<Object?> get props => [
@@ -148,8 +185,14 @@ class EmergencyCase extends Equatable {
         hazards,
         acceptedBy,
         acceptedAt,
+        arrivedAt,
+        arrivedBy,
         resolvedAt,
+        closedAt,
+        closedBy,
+        closeReason,
         waveLevel,
+        acceptDeadline,
       ];
 }
 

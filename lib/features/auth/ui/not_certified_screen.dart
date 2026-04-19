@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -59,7 +60,19 @@ class NotCertifiedScreen extends StatelessWidget {
                 onPressed: () =>
                     context.read<AuthProvider>().resetToPhoneEntry(),
               ),
-              const SizedBox(height: AppSpacing.sm),
+              const SizedBox(height: AppSpacing.xs),
+              Center(
+                child: TextButton.icon(
+                  onPressed: () => context.push('/auth/request-access'),
+                  icon: const Icon(Icons.assignment_ind_outlined, size: 18),
+                  label: Text(
+                    'Sertifikam var, başvurmak istiyorum',
+                    style: AppTypography.labelMd
+                        .copyWith(color: AppColors.primary),
+                  ),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xxs),
               Center(
                 child: TextButton(
                   onPressed: () {},

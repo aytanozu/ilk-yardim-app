@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' hide ChangeNotifierProvider;
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 
 import 'core/config/remote_config_service.dart';
+import 'core/firebase/emulator_config.dart';
 import 'core/firebase/firebase_bootstrap.dart';
 import 'core/location/background_service_runner.dart';
 import 'core/location/location_provider.dart';
@@ -26,6 +28,9 @@ Future<void> main() async {
 
   final firebaseReady = await FirebaseBootstrap.init();
   if (firebaseReady) {
+    // Must run BEFORE any Firestore/Auth/Functions call so the SDKs
+    // latch onto the emulator addresses.
+    await configureFirebaseEmulators();
     registerBackgroundMessageHandler();
     await AppRemoteConfig.instance.init();
     // Fire-and-forget — FCM registers tokens after auth.
@@ -34,7 +39,12 @@ Future<void> main() async {
     await BackgroundServiceRunner.instance.configure();
   }
 
-  runApp(const IlkYardimApp());
+  // Riverpod ProviderScope wraps the whole app so new code can
+  // `ref.watch(xProvider)` without explicit context lookups. The legacy
+  // MultiProvider inside IlkYardimApp still owns AuthProvider /
+  // LocationProvider; Riverpod handles the repo DI and any new
+  // observable state moving forward.
+  runApp(const ProviderScope(child: IlkYardimApp()));
 }
 
 class IlkYardimApp extends StatelessWidget {

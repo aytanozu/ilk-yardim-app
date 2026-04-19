@@ -23,6 +23,22 @@ class UserStats extends Equatable {
   List<Object?> get props => [interventions, educationPoints];
 }
 
+class NotificationPrefs extends Equatable {
+  const NotificationPrefs({this.criticalOnly = false});
+
+  final bool criticalOnly;
+
+  factory NotificationPrefs.fromMap(Map<String, dynamic>? map) =>
+      NotificationPrefs(
+        criticalOnly: map?['criticalOnly'] as bool? ?? false,
+      );
+
+  Map<String, dynamic> toMap() => {'criticalOnly': criticalOnly};
+
+  @override
+  List<Object?> get props => [criticalOnly];
+}
+
 class UserProfile extends Equatable {
   const UserProfile({
     required this.uid,
@@ -36,8 +52,14 @@ class UserProfile extends Equatable {
     this.badges = const [],
     this.fcmTokens = const [],
     this.active = true,
+    this.available = true,
+    this.notificationPrefs = const NotificationPrefs(),
     this.lastLocation,
     this.certificate,
+    this.certLevel,
+    this.reliability = 50,
+    this.activeEmergencyId,
+    this.unresponsiveSince,
     this.updatedAt,
   });
 
@@ -52,8 +74,24 @@ class UserProfile extends Equatable {
   final List<String> badges;
   final List<String> fcmTokens;
   final bool active;
+  final bool available;
+  final NotificationPrefs notificationPrefs;
   final GeoPoint? lastLocation;
   final CertificateInfo? certificate;
+  /// Normalized certification level (paramedic, als, bls,
+  /// advanced_first_aid, basic_first_aid) — derived server-side from the
+  /// free-text certificate.type via the `app_config/competency.aliases`
+  /// lookup. Used by the dispatch scorer for competency weighting.
+  final String? certLevel;
+  /// Reliability score 0..100 — starts at 50, adjusted by the server
+  /// based on on-time arrivals and no-shows. Feeds the dispatch scorer.
+  final int reliability;
+  /// When non-null, identifies the emergency this volunteer has accepted
+  /// and is actively responding to. Drives GPS burst mode.
+  final String? activeEmergencyId;
+  /// Server-stamped when the volunteer's GPS goes silent >60s during an
+  /// active case. Operator UI uses this to warn the dispatcher.
+  final DateTime? unresponsiveSince;
   final DateTime? updatedAt;
 
   factory UserProfile.fromSnapshot(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -71,11 +109,19 @@ class UserProfile extends Equatable {
       badges: (data['badges'] as List?)?.cast<String>() ?? const [],
       fcmTokens: (data['fcmTokens'] as List?)?.cast<String>() ?? const [],
       active: data['active'] as bool? ?? true,
+      available: data['available'] as bool? ?? true,
+      notificationPrefs: NotificationPrefs.fromMap(
+          data['notificationPrefs'] as Map<String, dynamic>?),
       lastLocation: data['lastLocation'] as GeoPoint?,
       certificate: data['certificate'] == null
           ? null
           : CertificateInfo.fromMap(
               Map<String, dynamic>.from(data['certificate'] as Map)),
+      certLevel: data['certLevel'] as String?,
+      reliability: (data['reliability'] as num?)?.toInt() ?? 50,
+      activeEmergencyId: data['activeEmergencyId'] as String?,
+      unresponsiveSince:
+          (data['unresponsiveSince'] as Timestamp?)?.toDate(),
       updatedAt: (data['updatedAt'] as Timestamp?)?.toDate(),
     );
   }
@@ -93,8 +139,14 @@ class UserProfile extends Equatable {
         badges,
         fcmTokens,
         active,
+        available,
+        notificationPrefs,
         lastLocation,
         certificate,
+        certLevel,
+        reliability,
+        activeEmergencyId,
+        unresponsiveSince,
         updatedAt,
       ];
 }

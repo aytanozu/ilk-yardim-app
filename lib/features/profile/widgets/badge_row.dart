@@ -30,6 +30,24 @@ class VolunteerBadge {
       Icons.bolt_rounded,
       AppColors.tertiary,
     ),
+    VolunteerBadge(
+      'trainer_plus',
+      'Uzman Eğitmen',
+      Icons.auto_stories_rounded,
+      AppColors.secondary,
+    ),
+    VolunteerBadge(
+      'streak_4w',
+      '4 Hafta Aktif',
+      Icons.local_fire_department_rounded,
+      AppColors.primary,
+    ),
+    VolunteerBadge(
+      'aed_reporter',
+      'AED Katkıcısı',
+      Icons.medical_services_rounded,
+      AppColors.tertiary,
+    ),
   ];
 }
 

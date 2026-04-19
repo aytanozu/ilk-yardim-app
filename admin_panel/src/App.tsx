@@ -7,6 +7,9 @@ import { NewEmergency } from './pages/NewEmergency';
 import { Volunteers } from './pages/Volunteers';
 import { Certificates } from './pages/Certificates';
 import { Reports } from './pages/Reports';
+import { AuditLog } from './pages/AuditLog';
+import { AEDs } from './pages/AEDs';
+import { RegistrationRequests } from './pages/RegistrationRequests';
 
 function Protected({ children }: { children: React.ReactElement }) {
   const { user, loading } = useAuth();
@@ -42,6 +45,9 @@ export default function App() {
           <Route path="volunteers" element={<Volunteers />} />
           <Route path="certificates" element={<Certificates />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="audit" element={<AuditLog />} />
+          <Route path="aeds" element={<AEDs />} />
+          <Route path="registrations" element={<RegistrationRequests />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

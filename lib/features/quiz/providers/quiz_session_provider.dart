@@ -66,13 +66,15 @@ class QuizSessionProvider extends ChangeNotifier {
     _completed = true;
     notifyListeners();
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
+    if (uid == null) return;
+    try {
       await _repo.saveAttempt(
-        uid: uid,
         quizId: quizId,
         answers: _answers,
         score: _score,
       );
+    } catch (_) {
+      // Best-effort: callable failure shouldn't block the result screen.
     }
   }
 }

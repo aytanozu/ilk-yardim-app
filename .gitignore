@@ -64,6 +64,8 @@ firebase/functions/.env.*
 # Admin panel
 admin_panel/node_modules/
 admin_panel/dist/
+admin_panel/build/
+admin_panel/tsconfig.tsbuildinfo
 admin_panel/.env
 admin_panel/.env.*.local
 
@@ -82,3 +84,7 @@ ios/Flutter/Flutter.podspec
 firebase/seed/*.csv
 firebase/seed/*.json
 !firebase/seed/*.example.*
+
+# Abandoned windows platform (kept aside locally so flutter pub get
+# doesn't trip on symlinks without Developer Mode).
+windows.disabled/

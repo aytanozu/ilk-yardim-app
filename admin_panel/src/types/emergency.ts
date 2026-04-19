@@ -31,7 +31,18 @@ export const HAZARDS: Record<string, string> = {
   chemical: 'Kimyasal',
 };
 
-export type EmergencyStatus = 'open' | 'accepted' | 'resolved' | 'cancelled';
+export type EmergencyStatus =
+  | 'open'
+  | 'accepted'
+  | 'resolved'
+  | 'cancelled'
+  | 'expired';
+
+export type CloseReason =
+  | 'cancelled'
+  | 'expired'
+  | 'resolved'
+  | 'timeout_1h';
 
 export interface EmergencyDoc {
   id?: string;
@@ -52,5 +63,9 @@ export interface EmergencyDoc {
   region: { country: string; city: string; district: string };
   status: EmergencyStatus;
   waveLevel: number;
-  acceptedBy: string | null;
+  acceptedBy: string[];
+  closedAt?: unknown;
+  closedBy?: string;
+  closeReason?: CloseReason;
+  createdAt?: unknown;
 }

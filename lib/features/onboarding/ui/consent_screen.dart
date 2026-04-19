@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -102,13 +103,15 @@ class _ConsentScreenState extends State<ConsentScreen> {
                       children: [
                         Expanded(
                           child: TextButton(
-                            onPressed: () {},
+                            onPressed: () =>
+                                context.push('/legal/aydinlatma'),
                             child: const Text('Aydınlatma Metni'),
                           ),
                         ),
                         Expanded(
                           child: TextButton(
-                            onPressed: () {},
+                            onPressed: () =>
+                                context.push('/legal/gizlilik'),
                             child: const Text('Gizlilik Politikası'),
                           ),
                         ),

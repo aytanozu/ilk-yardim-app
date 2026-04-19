@@ -18,6 +18,24 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    // Fields a certified user is allowed to write on their own doc.
+    // `stats`, `badges`, `role`, `roleLabel`, `certificate`, `phone` are
+    // server-authoritative and must NOT be in this list.
+    function userSelfWriteAllowlist() {
+      return [
+        'fullName',
+        'avatarUrl',
+        'region',
+        'active',
+        'available',
+        'notificationPrefs',
+        'fcmTokens',
+        'lastLocation',
+        'geohash',
+        'updatedAt'
+      ];
+    }
+
     // Certified phones — only server (Cloud Functions) writes.
     // Client can't read or list; all validation via callable.
     match /certified_phones/{phone} {
@@ -28,20 +46,30 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isSelf(uid) || isDispatcher();
       allow create: if isSelf(uid);
-      allow update: if (isSelf(uid) && isCertified())
-                    || isDispatcher();
+      allow update: if isDispatcher()
+                    || (isSelf(uid) && isCertified() &&
+                        request.resource.data.diff(resource.data)
+                          .affectedKeys()
+                          .hasOnly(userSelfWriteAllowlist()));
       allow delete: if isDispatcher();
+
+      // Post-incident debrief journal — owner writes, dispatcher reads
+      // for aggregate welfare review. One doc per emergencyId.
+      match /debriefs/{emergencyId} {
+        allow read: if isSelf(uid) || isDispatcher();
+        allow create, update: if isSelf(uid) && isCertified();
+        allow delete: if isSelf(uid);
+      }
     }
 
-    // Emergencies: certified users read open cases in their region;
-    // create only by dispatcher; accept via callable transaction.
+    // Emergencies: certified users read; mutations funneled through
+    // Cloud Functions (acceptEmergency, closeEmergency). Direct writes
+    // are dispatcher-only so the client cannot tamper with
+    // status/acceptedBy/stats-side-effects.
     match /emergencies/{id} {
       allow read: if isCertified() || isDispatcher();
       allow create: if isDispatcher();
-      allow update: if isDispatcher()
-                    || (isCertified() &&
-                        request.resource.data.acceptedBy == request.auth.uid &&
-                        resource.data.status == 'open');
+      allow update: if isDispatcher();
       allow delete: if isDispatcher();
     }
 
@@ -76,6 +104,16 @@ service cloud.firestore {
       allow write: if isDispatcher();
     }
 
+    // AED registry — certified volunteers can read all entries and
+    // submit new pending ones; dispatchers gate approvals/removals.
+    match /aeds/{id} {
+      allow read: if isCertified();
+      allow create: if isCertified()
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.reportedBy == request.auth.uid;
+      allow update, delete: if isDispatcher();
+    }
+
     // Quizzes
     match /quizzes/{id} {
       allow read: if isCertified();
@@ -87,16 +125,67 @@ service cloud.firestore {
       }
     }
 
-    // Quiz attempts — owner only.
+    // Quiz attempts — reads are owner/dispatcher. Writes funneled
+    // through recordQuizAttempt Cloud Function so education points
+    // cannot be self-awarded.
     match /quiz_attempts/{aid} {
-      allow read, write: if isCertified() &&
-                         request.resource.data.uid == request.auth.uid;
+      allow read: if isSignedIn() && (
+                    resource.data.uid == request.auth.uid || isDispatcher()
+                  );
+      allow write: if isDispatcher();
+    }
+
+    // Self-registration requests — any signed-in user can submit their
+    // own request; dispatchers review and a Cloud Function promotes to
+    // `certified_phones` on approval.
+    match /registration_requests/{id} {
+      allow create: if isSignedIn()
+                    && request.resource.data.status == 'pending';
+      allow read: if isDispatcher();
+      allow update, delete: if isDispatcher();
+    }
+
+    // Account deletion requests — user files a request; dispatcher/admin
+    // fulfills it out-of-band.
+    match /account_deletion_requests/{uid} {
+      allow read: if isSelf(uid) || isDispatcher();
+      allow create: if isSelf(uid);
+      allow update, delete: if isDispatcher();
     }
 
     // Audit log — dispatcher read only; server write.
     match /audit_log/{id} {
       allow read: if isDispatcher();
       allow write: if false;
+    }
+
+    // Rate-limit counters — server-only, clients can't read or tamper.
+    match /rate_limits/{id} {
+      allow read, write: if false;
+    }
+
+    // High-cadence volunteer GPS trail, written during an active case
+    // (burst mode). Separate from users/{uid}.lastLocation so the indexed
+    // fields on users don't churn every 10s during dispatch.
+    match /volunteer_locations/{uid} {
+      allow read: if isSelf(uid) || isDispatcher();
+      allow write: if isSelf(uid) && isCertified();
+    }
+
+    // Post-incident intervention reports — owner or dispatcher read.
+    // Writes go through the `recordIntervention` callable so we can
+    // validate that the caller was actually in acceptedBy.
+    match /intervention_reports/{id} {
+      allow read: if isDispatcher()
+                  || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow write: if false;
+    }
+
+    // App configuration: WAVE_PLAN, competency matrix, etc. Any signed-in
+    // user can read (functions consult this); only dispatchers can tune.
+    match /app_config/{id} {
+      allow read: if isSignedIn();
+      allow write: if isDispatcher();
     }
 
     // Waitlist — users awaiting region activation

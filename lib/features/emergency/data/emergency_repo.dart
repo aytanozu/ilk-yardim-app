@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
+import '../../../core/observability/breadcrumbs.dart';
 import '../../../shared/models/emergency_case.dart';
 
 class EmergencyRepo {
@@ -34,8 +35,25 @@ class EmergencyRepo {
   }
 
   Future<void> accept(String emergencyId) async {
+    breadcrumb('accept_call_start', {'emergencyId': emergencyId});
+    try {
+      await _functions
+          .httpsCallable('acceptEmergency')
+          .call<Map<String, dynamic>>({'emergencyId': emergencyId});
+      breadcrumb('accept_call_ok', {'emergencyId': emergencyId});
+    } catch (e) {
+      breadcrumb('accept_call_fail',
+          {'emergencyId': emergencyId, 'err': e.toString()});
+      rethrow;
+    }
+  }
+
+  /// Idempotent arrival signal — backend stamps `arrivedAt` only the
+  /// first time any acceptor fires this for a given case.
+  Future<void> markArrived(String emergencyId) async {
+    breadcrumb('mark_arrived', {'emergencyId': emergencyId});
     await _functions
-        .httpsCallable('acceptEmergency')
+        .httpsCallable('markArrived')
         .call<Map<String, dynamic>>({'emergencyId': emergencyId});
   }
 }

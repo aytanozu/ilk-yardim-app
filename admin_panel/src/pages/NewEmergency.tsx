@@ -15,7 +15,8 @@ import {
   useMap,
 } from 'react-leaflet';
 import L from 'leaflet';
-import { auth, db } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, db, functions } from '../lib/firebase';
 import {
   EMERGENCY_TYPES,
   HAZARDS,
@@ -29,6 +30,28 @@ import {
   slugifyRegion,
   type GeocodeResult,
 } from '../lib/nominatim';
+
+interface PreviewCandidate {
+  uid: string;
+  certLevel?: string;
+  reliability?: number;
+  distanceMeters?: number;
+  score?: number;
+  breakdown?: {
+    distance: number;
+    competency: number;
+    reliability: number;
+    total: number;
+  };
+}
+
+const CERT_LABEL_NE: Record<string, string> = {
+  paramedic: 'Paramedik',
+  als: 'İleri YD',
+  bls: 'Temel YD',
+  advanced_first_aid: 'İleri İY',
+  basic_first_aid: 'Temel İY',
+};
 
 interface FormData {
   type: EmergencyType;
@@ -74,6 +97,52 @@ export function NewEmergency() {
   const addr = watch('address');
   const severity = watch('severity');
   const hazards = watch('hazards');
+  const type = watch('type');
+  const [preview, setPreview] = useState<PreviewCandidate[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
+
+  // Debounced live preview: whenever the pin / type / severity changes,
+  // ask the backend which volunteers would be notified and what their
+  // weighted scores look like. Lets the dispatcher validate cert + reach
+  // before committing.
+  useEffect(() => {
+    if (!pin) {
+      setPreview([]);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(async () => {
+      setPreviewLoading(true);
+      try {
+        const fn = httpsCallable<
+          {
+            lat: number;
+            lng: number;
+            type: string;
+            severity: string;
+            limit: number;
+          },
+          { ok: boolean; candidates: PreviewCandidate[] }
+        >(functions, 'previewDispatchCandidates');
+        const res = await fn({
+          lat: pin.lat,
+          lng: pin.lng,
+          type,
+          severity,
+          limit: 5,
+        });
+        if (!cancelled) setPreview(res.data.candidates ?? []);
+      } catch {
+        if (!cancelled) setPreview([]);
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [pin, type, severity]);
 
   useEffect(() => {
     if (!pin) return;
@@ -145,7 +214,7 @@ export function NewEmergency() {
           region: { country: 'TR', city, district },
           status: 'open',
           waveLevel: 0,
-          acceptedBy: null,
+          acceptedBy: [],
           notifiedUids: [],
           createdBy: auth.currentUser?.uid,
           createdAt: serverTimestamp(),
@@ -382,6 +451,60 @@ export function NewEmergency() {
             Küçük harf, boşluksuz, Türkçesiz (ı→i, ş→s). Mobil uygulama bu
             alanlara göre gönüllüleri filtreler.
           </div>
+
+          {pin && (
+            <div className="bg-surface-lowest rounded-xl p-3 text-xs">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold text-onsurface-variant uppercase tracking-wide">
+                  Hedef Gönüllüler
+                </div>
+                {previewLoading && (
+                  <div className="text-[10px] text-onsurface-variant">
+                    Hesaplanıyor…
+                  </div>
+                )}
+              </div>
+              {preview.length === 0 && !previewLoading && (
+                <div className="mt-2 text-onsurface-variant">
+                  Bu konumda uygun gönüllü bulunamadı.
+                </div>
+              )}
+              <div className="mt-2 space-y-1.5">
+                {preview.map((p, idx) => (
+                  <div
+                    key={p.uid}
+                    className="flex items-center gap-2 bg-surface-low rounded-md px-2 py-1.5"
+                  >
+                    <div className="text-xs font-bold text-primary w-4">
+                      {idx + 1}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-mono text-[10px] truncate">
+                        {p.uid.slice(0, 8)}
+                      </div>
+                      <div className="text-[10px] text-onsurface-variant">
+                        {CERT_LABEL_NE[p.certLevel ?? ''] ?? '—'} ·{' '}
+                        {p.distanceMeters != null
+                          ? `${Math.round(p.distanceMeters)} m`
+                          : '—'}{' '}
+                        · güv.{p.reliability ?? '—'}
+                      </div>
+                    </div>
+                    {p.breakdown && (
+                      <div className="text-right text-[10px] font-mono text-onsurface-variant">
+                        D{Math.round(p.breakdown.distance)}+C
+                        {Math.round(p.breakdown.competency)}+R
+                        {Math.round(p.breakdown.reliability)}
+                      </div>
+                    )}
+                    <div className="text-base font-bold text-primary">
+                      {p.score ?? '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {err && <div className="text-error text-sm">{err}</div>}
 

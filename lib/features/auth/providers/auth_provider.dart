@@ -1,11 +1,15 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/location/background_service_runner.dart';
 import '../../../core/notifications/fcm_service.dart';
+import '../../../core/observability/breadcrumbs.dart';
 import '../../../shared/models/user_profile.dart';
 import '../data/auth_repo.dart';
 
@@ -34,6 +38,13 @@ class AuthProvider extends ChangeNotifier {
   UserProfile? _profile;
   String? _notCertifiedReason;
 
+  void _transitionStage(AuthStage next) {
+    if (_stage == next) return;
+    breadcrumb('auth_stage', {'from': _stage.name, 'to': next.name});
+    setCustomKey('auth_stage', next.name);
+    _stage = next;
+  }
+
   AuthStage get stage => _stage;
   String? get phoneE164 => _phoneE164;
   String? get lastError => _lastError;
@@ -47,22 +58,38 @@ class AuthProvider extends ChangeNotifier {
       _profile = null;
       if (_stage != AuthStage.awaitingCode &&
           _stage != AuthStage.notCertified) {
-        _stage = AuthStage.phoneEntry;
+        _transitionStage(AuthStage.phoneEntry);
       }
       BackgroundServiceRunner.instance.stop();
+      _clearCrashlyticsUser();
     } else {
       _profileSub?.cancel();
       _profileSub = _repo.watchProfile(user.uid).listen((p) {
         _profile = p;
         if (p != null && _stage != AuthStage.authenticated) {
-          _stage = AuthStage.authenticated;
+          _transitionStage(AuthStage.authenticated);
         }
         notifyListeners();
       });
       FcmService.instance.registerForCurrentUser();
       _ensureLocationAndStartService();
+      _setCrashlyticsUser(user.uid);
     }
     notifyListeners();
+  }
+
+  void _setCrashlyticsUser(String uid) {
+    try {
+      FirebaseCrashlytics.instance.setUserIdentifier(uid);
+    } catch (_) {
+      // Crashlytics unavailable (e.g., web or uninitialized). Non-fatal.
+    }
+  }
+
+  void _clearCrashlyticsUser() {
+    try {
+      FirebaseCrashlytics.instance.setUserIdentifier('');
+    } catch (_) {}
   }
 
   /// Requests location permission up to "Always" then boots the native
@@ -101,13 +128,13 @@ class AuthProvider extends ChangeNotifier {
     _phoneE164 = phoneE164;
     final check = await _repo.checkCertified(phoneE164);
     if (!check.ok) {
-      _stage = AuthStage.notCertified;
+      _transitionStage(AuthStage.notCertified);
       _notCertifiedReason = check.reason;
       notifyListeners();
       return;
     }
 
-    _stage = AuthStage.awaitingCode;
+    _transitionStage(AuthStage.awaitingCode);
     notifyListeners();
 
     await _repo.startPhoneVerification(
@@ -119,7 +146,7 @@ class AuthProvider extends ChangeNotifier {
       onAutoVerified: _finalize,
       onError: (msg) {
         _lastError = msg;
-        _stage = AuthStage.phoneEntry;
+        _transitionStage(AuthStage.phoneEntry);
         notifyListeners();
       },
     );
@@ -132,7 +159,7 @@ class AuthProvider extends ChangeNotifier {
       return;
     }
     try {
-      _stage = AuthStage.finalizing;
+      _transitionStage(AuthStage.finalizing);
       notifyListeners();
       await _repo.confirmOtp(
         verificationId: _verificationId!,
@@ -141,7 +168,7 @@ class AuthProvider extends ChangeNotifier {
       await _finalize();
     } catch (e) {
       _lastError = 'Kod doğrulanamadı';
-      _stage = AuthStage.awaitingCode;
+      _transitionStage(AuthStage.awaitingCode);
       notifyListeners();
     }
   }
@@ -159,12 +186,83 @@ class AuthProvider extends ChangeNotifier {
     _lastError = null;
     _notCertifiedReason = null;
     _verificationId = null;
-    _stage = AuthStage.phoneEntry;
+    _transitionStage(AuthStage.phoneEntry);
     notifyListeners();
   }
 
   Future<void> signOut() async {
+    // Clean up this device's FCM token from the user's doc BEFORE we
+    // lose the auth context — otherwise the next user on this device
+    // could receive pushes addressed to the previous user's tokens.
+    await _cleanupFcmToken();
     await _repo.signOut();
+  }
+
+  Future<void> _cleanupFcmToken() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return;
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token != null) {
+        await FirebaseFirestore.instance.collection('users').doc(uid).set(
+          {
+            'fcmTokens': FieldValue.arrayRemove([token]),
+          },
+          SetOptions(merge: true),
+        );
+      }
+      await FirebaseMessaging.instance.deleteToken();
+    } catch (e) {
+      // Firebase uninitialized (unit tests, web without plugin) — treat
+      // as best-effort and let signOut continue.
+      debugPrint('fcm token cleanup on signOut skipped: $e');
+    }
+  }
+
+  /// Toggle whether this volunteer is available to receive wave pushes.
+  /// Written to users/{uid}.available; the `onEmergencyCreate` function
+  /// filters recipients on this field.
+  Future<void> setAvailable(bool value) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    await FirebaseFirestore.instance.collection('users').doc(uid).set(
+      {
+        'available': value,
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+  }
+
+  /// Update the volunteer's notification preferences.
+  Future<void> updateNotificationPrefs({required bool criticalOnly}) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    await FirebaseFirestore.instance.collection('users').doc(uid).set(
+      {
+        'notificationPrefs': {'criticalOnly': criticalOnly},
+        'updatedAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+  }
+
+  /// Save profile edits (name, region).
+  Future<void> updateProfile({
+    String? fullName,
+    Map<String, dynamic>? region,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final update = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (fullName != null) update['fullName'] = fullName;
+    if (region != null) update['region'] = region;
+    await FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .set(update, SetOptions(merge: true));
   }
 
   @override

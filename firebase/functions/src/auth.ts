@@ -1,6 +1,9 @@
 import * as admin from 'firebase-admin';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { logger } from 'firebase-functions';
+import { loadCompetency, normalizeCertLevel } from './config_loader';
+import { assertWithinRateLimit, sanitizeKey } from './rate_limit';
 
 const REGION = 'europe-west3';
 
@@ -21,6 +24,23 @@ export const checkCertifiedPhone = onCall(
       return { ok: false, reason: 'invalid_format' };
     }
 
+    // Two-dimensional throttle to blunt phone-enumeration attacks:
+    //   • per-phone: 5 checks / 5 min (legit users need maybe 2)
+    //   • per-caller-IP: 30 checks / 5 min (lets families on one NAT work)
+    // On rate-limit, we return the opaque `rate_limited` reason rather than
+    // leaking whether the phone exists.
+    await assertWithinRateLimit(`check:phone:${sanitizeKey(phone)}`, {
+      max: 5,
+      windowMs: 5 * 60_000,
+      reasonCode: 'rate_limited',
+    });
+    const ip = (request.rawRequest?.ip as string | undefined) ?? 'unknown';
+    await assertWithinRateLimit(`check:ip:${sanitizeKey(ip)}`, {
+      max: 30,
+      windowMs: 5 * 60_000,
+      reasonCode: 'rate_limited',
+    });
+
     const doc = await admin
       .firestore()
       .collection('certified_phones')
@@ -32,7 +52,7 @@ export const checkCertifiedPhone = onCall(
       return { ok: false, reason: 'not_found' };
     }
 
-    const expiresAt = doc.get('expiresAt') as admin.firestore.Timestamp | undefined;
+    const expiresAt = doc.get('expiresAt') as Timestamp | undefined;
     if (expiresAt && expiresAt.toMillis() < Date.now()) {
       return { ok: false, reason: 'expired' };
     }
@@ -64,7 +84,7 @@ export const finalizeSignup = onCall(
       throw new HttpsError('permission-denied', 'Not certified');
     }
     const certData = certDoc.data() ?? {};
-    const expiresAt = certData.expiresAt as admin.firestore.Timestamp | undefined;
+    const expiresAt = certData.expiresAt as Timestamp | undefined;
     if (expiresAt && expiresAt.toMillis() < Date.now()) {
       throw new HttpsError('permission-denied', 'Certificate expired');
     }
@@ -72,6 +92,12 @@ export const finalizeSignup = onCall(
     await admin.auth().setCustomUserClaims(uid, { certified: true });
 
     const userRef = admin.firestore().collection('users').doc(uid);
+    const certType =
+      (certData.certificateType as string | undefined) ??
+      'İleri İlkyardım Sertifikası';
+    const competencyCfg = await loadCompetency();
+    const certLevel = normalizeCertLevel(certType, competencyCfg);
+
     const snap = await userRef.get();
     if (!snap.exists) {
       await userRef.set({
@@ -83,20 +109,31 @@ export const finalizeSignup = onCall(
         badges: [],
         fcmTokens: [],
         active: true,
+        available: true,
+        reliability: 50,
+        certLevel,
+        notificationPrefs: { criticalOnly: false },
         certificate: {
-          type: certData.certificateType ?? 'İleri İlkyardım Sertifikası',
+          type: certType,
           issuer: certData.issuer ?? 'Sağlık Bakanlığı Onaylı',
           expiresAt: certData.expiresAt ?? null,
           certificateId: certData.certificateId ?? null,
         },
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     } else {
-      await userRef.update({
-        active: true,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+      // Backfill certLevel + reliability on returning users created
+      // before the scoring rollout.
+      await userRef.set(
+        {
+          active: true,
+          certLevel,
+          reliability: snap.get('reliability') ?? 50,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
     }
 
     return { ok: true, uid };

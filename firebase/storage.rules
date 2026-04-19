@@ -29,5 +29,18 @@ service firebase.storage {
       allow read: if isCertified();
       allow write: if false;
     }
+
+    // Registration certificate uploads — any signed-in user can upload
+    // their OWN directory; dispatchers (via server claims) can read
+    // during approval. No delete from client.
+    match /registration_docs/{uid}/{file} {
+      allow read: if isSelf(uid)
+                  || (isSignedIn() && request.auth.token.role == 'dispatcher');
+      allow create: if isSelf(uid)
+                    && request.resource.size < 5 * 1024 * 1024
+                    && request.resource.contentType.matches('image/.*');
+      allow update, delete: if isSignedIn()
+                            && request.auth.token.role == 'dispatcher';
+    }
   }
 }

@@ -1,10 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/location/location_provider.dart';
+import '../../debrief/data/debrief_repo.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
@@ -38,8 +40,22 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await context.read<LocationProvider>().start(requestAlways: true);
       _autoSelectAcceptedCase();
+      _maybeOpenDebrief();
     });
     AcceptedCaseNotifier.instance.addListener(_autoSelectAcceptedCase);
+  }
+
+  /// If a case closed while we were backgrounded, FCM stashed its id in
+  /// SharedPreferences. Open the debrief check-in now so the volunteer
+  /// can reflect. One-shot — the resources screen clears the marker on
+  /// save.
+  Future<void> _maybeOpenDebrief() async {
+    final pending = await DebriefRepo().readPending();
+    if (pending == null || !mounted) return;
+    // Give the map a beat to render before pushing.
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (!mounted) return;
+    context.push('/debrief/$pending/check-in');
   }
 
   @override

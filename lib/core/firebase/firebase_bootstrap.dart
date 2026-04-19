@@ -5,6 +5,7 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../firebase_options.dart';
+import 'emulator_config.dart';
 
 class FirebaseBootstrap {
   FirebaseBootstrap._();
@@ -44,9 +45,30 @@ class FirebaseBootstrap {
     }
 
     if (!kIsWeb) {
-      FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterError;
+      // Suppress collection in debug builds and when pointed at the local
+      // emulator — otherwise every dev iteration floods the Crashlytics
+      // console with noise. In release/non-emulator, record everything.
+      final collect = !kDebugMode && !kUseFirebaseEmulator;
+      try {
+        await FirebaseCrashlytics.instance
+            .setCrashlyticsCollectionEnabled(collect);
+      } catch (e) {
+        debugPrint('Crashlytics toggle failed: $e');
+      }
+
+      FlutterError.onError = (FlutterErrorDetails details) {
+        // Still print to console during development for fast feedback.
+        FlutterError.presentError(details);
+        if (collect) {
+          FirebaseCrashlytics.instance.recordFlutterError(details);
+        }
+      };
       PlatformDispatcher.instance.onError = (error, stack) {
-        FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        if (collect) {
+          FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+        } else {
+          debugPrint('Uncaught async error: $error\n$stack');
+        }
         return true;
       };
     }

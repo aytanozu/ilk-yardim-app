@@ -1,11 +1,20 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, onIdTokenChanged, type User } from 'firebase/auth';
 import {
+  connectAuthEmulator,
+  getAuth,
+  onIdTokenChanged,
+  type User,
+} from 'firebase/auth';
+import {
+  connectFirestoreEmulator,
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
 } from 'firebase/firestore';
-import { getFunctions } from 'firebase/functions';
+import {
+  connectFunctionsEmulator,
+  getFunctions,
+} from 'firebase/functions';
 
 // Replace with real values in `.env.local`:
 // VITE_FB_API_KEY, VITE_FB_AUTH_DOMAIN, VITE_FB_PROJECT_ID,
@@ -30,6 +39,22 @@ export const db = initializeFirestore(app, {
 
 export const auth = getAuth(app);
 export const functions = getFunctions(app, 'europe-west3');
+
+// Emulator wiring: set VITE_USE_EMULATOR=true in `.env.local` (or pass
+// via `VITE_USE_EMULATOR=true npm run dev`). Safe to call at module
+// load because Firebase SDKs treat idempotent connect* calls as no-ops
+// if the same host/port is already set.
+const USE_EMULATOR = import.meta.env.VITE_USE_EMULATOR === 'true';
+if (USE_EMULATOR) {
+  const host = '127.0.0.1';
+  // eslint-disable-next-line no-console
+  console.info('[emulator] wiring admin panel to Firebase emulator suite');
+  connectFirestoreEmulator(db, host, 8080);
+  connectAuthEmulator(auth, `http://${host}:9099`, {
+    disableWarnings: true,
+  });
+  connectFunctionsEmulator(functions, host, 5001);
+}
 
 export type DispatcherUser = User & { dispatcher: true };
 

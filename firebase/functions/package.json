@@ -10,7 +10,12 @@
     "serve": "npm run build && firebase emulators:start --only functions,firestore,auth",
     "shell": "npm run build && firebase functions:shell",
     "deploy": "firebase deploy --only functions",
-    "logs": "firebase functions:log"
+    "logs": "firebase functions:log",
+    "test": "jest",
+    "seed:emulator": "ts-node --transpile-only scripts/seed_emulator.ts",
+    "seed:admin-login": "ts-node --transpile-only scripts/seed_admin_login.ts",
+    "seed:config": "ts-node --transpile-only scripts/seed_config.ts",
+    "assign-dispatcher": "ts-node --transpile-only ../scripts/assignDispatcher.ts"
   },
   "dependencies": {
     "firebase-admin": "^12.7.0",
@@ -18,9 +23,14 @@
     "geofire-common": "^6.0.0"
   },
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@typescript-eslint/eslint-plugin": "^8.8.0",
     "@typescript-eslint/parser": "^8.8.0",
     "eslint": "^9.12.0",
+    "firebase-functions-test": "^3.3.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.2",
     "typescript": "^5.6.2"
   },
   "private": true

@@ -30,7 +30,10 @@ export function Shell() {
             { to: '/new', label: 'Yeni Çağrı', icon: '+' },
             { to: '/volunteers', label: 'Gönüllüler', icon: '◉' },
             { to: '/certificates', label: 'Sertifikalar', icon: '✓' },
+            { to: '/registrations', label: 'Başvurular', icon: '☑' },
+            { to: '/aeds', label: 'AED Kayıtları', icon: '⚕' },
             { to: '/reports', label: 'Raporlar', icon: '≡' },
+            { to: '/audit', label: 'Denetim Kaydı', icon: '⎙' },
           ].map((i) => (
             <NavLink
               key={i.to}

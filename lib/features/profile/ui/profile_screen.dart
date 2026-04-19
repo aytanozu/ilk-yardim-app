@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../shared/models/user_profile.dart';
+import '../../../shared/widgets/settings_row.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../widgets/badge_row.dart';
 import '../widgets/certificate_card.dart';
@@ -25,8 +27,8 @@ class ProfileScreen extends StatelessWidget {
             style: AppTypography.titleLg.copyWith(letterSpacing: 3)),
         actions: [
           IconButton(
-            onPressed: () {},
-            icon: const Icon(Icons.notifications_none_rounded),
+            onPressed: () => context.push('/settings'),
+            icon: const Icon(Icons.settings_rounded),
           ),
           const SizedBox(width: AppSpacing.xs),
         ],
@@ -97,17 +99,27 @@ class _ProfileBody extends StatelessWidget {
         if (profile.certificate != null)
           CertificateCard(certificate: profile.certificate!),
         const SizedBox(height: AppSpacing.lg),
-        _SettingsRow(
+        SettingsRow(
           icon: Icons.settings_rounded,
           label: 'Ayarlar',
-          onTap: () {},
+          onTap: () => context.push('/settings'),
         ),
-        _SettingsRow(
+        SettingsRow(
+          icon: Icons.medical_services_rounded,
+          label: 'AED Bildir',
+          onTap: () => context.push('/aed/report'),
+        ),
+        SettingsRow(
+          icon: Icons.history_rounded,
+          label: 'Geçmiş Müdahalelerim',
+          onTap: () => context.push('/debriefs'),
+        ),
+        SettingsRow(
           icon: Icons.privacy_tip_outlined,
           label: 'Gizlilik ve KVKK',
-          onTap: () {},
+          onTap: () => context.push('/privacy'),
         ),
-        _SettingsRow(
+        SettingsRow(
           icon: Icons.logout_rounded,
           label: 'Çıkış Yap',
           onTap: () => context.read<AuthProvider>().signOut(),
@@ -242,50 +254,3 @@ class _StatusChip extends StatelessWidget {
   }
 }
 
-class _SettingsRow extends StatelessWidget {
-  const _SettingsRow({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.color,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final c = color ?? AppColors.onSurface;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: AppSpacing.borderLg,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.sm,
-          vertical: AppSpacing.md,
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: c, size: 22),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(
-              child: Text(
-                label,
-                style: AppTypography.bodyLg.copyWith(
-                  color: c,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: AppColors.onSurfaceVariant,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

@@ -7,6 +7,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/debrief/data/debrief_repo.dart';
+import '../observability/breadcrumbs.dart';
 import '../router/navigator_keys.dart';
 
 /// Handles FCM registration, token persistence, topic subscriptions,
@@ -104,6 +106,19 @@ class FcmService {
 
   void _handleForeground(RemoteMessage message) {
     final id = message.data['emergencyId'] as String?;
+    final msgType = message.data['type'] as String?;
+    breadcrumb('fcm_fg', {'type': msgType ?? 'alert', 'emergencyId': id});
+
+    // Silent control messages — data-only pushes that mutate local state.
+    if (msgType == 'case_closed') {
+      _handleCaseClosed(id, message.data['reason'] as String?);
+      return;
+    }
+    if (msgType == 'case_updated') {
+      // Nothing to surface; Firestore stream already reflects the change.
+      return;
+    }
+
     final isCritical = message.data['severity'] == 'critical';
     final channel = isCritical ? 'critical_alert' : 'new_call';
     final title = message.notification?.title ??
@@ -117,8 +132,13 @@ class FcmService {
       return;
     }
 
+    // Key the local notification by the emergencyId (when present) so a
+    // later case_closed push can dismiss it precisely. Fall back to the
+    // FCM messageId hash for non-emergency notifications.
+    final notifKey =
+        id != null ? 'emergency_$id'.hashCode : message.messageId.hashCode;
     _local.show(
-      message.messageId.hashCode,
+      notifKey,
       title,
       body,
       NotificationDetails(
@@ -149,6 +169,7 @@ class FcmService {
 
   void _handleTap(RemoteMessage message) {
     final id = message.data['emergencyId'] as String?;
+    breadcrumb('fcm_tap', {'emergencyId': id});
     if (id != null) _navigateToEmergency(id);
   }
 
@@ -163,6 +184,23 @@ class FcmService {
     final ctx = rootNavigatorKey.currentContext;
     if (ctx == null) return;
     ctx.go('/emergency/$id');
+  }
+
+  void _handleCaseClosed(String? id, String? reason) {
+    // Firestore watchCase stream on the detail screen already reacts to
+    // status changes and swaps in the closed banner. The map/list repo
+    // filters expired/cancelled/resolved out. Nothing to do here beyond
+    // suppressing any visible notification for this case — use the same
+    // key derivation as _handleForeground above — and stashing the id
+    // for the post-incident debrief flow to pick up on next foreground.
+    if (id != null) {
+      _local.cancel('emergency_$id'.hashCode);
+      // Best-effort: mark the emergency for a debrief prompt. Only
+      // emergencies the user accepted will render a debrief (the UI
+      // cross-checks acceptedBy), but marking every case closed is safe
+      // since the check happens at open-time, not here.
+      DebriefRepo().markPending(id);
+    }
   }
 
   Future<void> _registerToken() async {

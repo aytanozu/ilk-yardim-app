@@ -10,7 +10,10 @@ import 'package:flutter_background_service_android/flutter_background_service_an
 import 'package:geolocator/geolocator.dart';
 
 import '../../firebase_options.dart';
+import '../firebase/emulator_config.dart';
+import '../observability/breadcrumbs.dart';
 import 'geohash.dart';
+import 'low_power_policy.dart';
 
 /// Runs a separate Dart isolate as an Android foreground service so the
 /// volunteer's location continues to sync even after the app is swiped off
@@ -26,6 +29,10 @@ class BackgroundServiceRunner {
   final _service = FlutterBackgroundService();
 
   Future<void> configure() async {
+    if (kUseFirebaseEmulator) {
+      debugPrint('[bgservice] configure skipped (emulator build)');
+      return;
+    }
     await _service.configure(
       androidConfiguration: AndroidConfiguration(
         onStart: _onStart,
@@ -48,21 +55,34 @@ class BackgroundServiceRunner {
   Future<bool> get isRunning => _service.isRunning();
 
   Future<void> start() async {
+    // Skip on emulator builds: the foreground service competes with the
+    // in-app Geolocator subscription and frequently crashes with
+    // CannotPostForegroundServiceNotificationException on Android 14+
+    // emulators. Production release builds still get the real service.
+    if (kUseFirebaseEmulator) {
+      debugPrint('[bgservice] skipped (emulator build)');
+      breadcrumb('bg_start_skipped_emulator');
+      return;
+    }
     try {
       if (await _service.isRunning()) {
         debugPrint('[bgservice] already running');
+        breadcrumb('bg_start_noop');
         return;
       }
       final ok = await _service.startService();
       debugPrint('[bgservice] startService returned: $ok');
+      breadcrumb('bg_start', {'ok': ok});
     } catch (e, s) {
       debugPrint('[bgservice] start failed: $e\n$s');
+      breadcrumb('bg_start_fail', {'err': e.toString()});
     }
   }
 
   Future<void> stop() async {
     if (!await _service.isRunning()) return;
     _service.invoke('stopService');
+    breadcrumb('bg_stop');
   }
 }
 
@@ -108,14 +128,77 @@ Future<void> _onStart(ServiceInstance service) async {
 
   DateTime? lastWrite;
   Position? lastWritten;
+  LocationPolicy batteryPolicy = LocationPolicy.full;
+  LocationPolicy currentPolicy = LocationPolicy.full;
+  bool burstActive = false;
+
+  void recomputeEffectivePolicy() {
+    // Burst mode overrides battery policy only if battery policy isn't
+    // suspended (we never keep writing if battery is critically low).
+    if (burstActive && batteryPolicy.mode != LocationPowerMode.suspended) {
+      currentPolicy = LocationPolicy.burst;
+    } else {
+      currentPolicy = batteryPolicy;
+    }
+  }
+
+  Future<void> applyBatteryPolicy() async {
+    final pct = await readBatteryPercent();
+    final next = LocationPolicy.forBatteryPercent(pct);
+    if (next.mode == batteryPolicy.mode) return;
+    debugPrint('[bgservice] battery policy ${batteryPolicy.mode} → '
+        '${next.mode} (battery=$pct%)');
+    batteryPolicy = next;
+    recomputeEffectivePolicy();
+
+    if (service is AndroidServiceInstance) {
+      final modeLabel = switch (next.mode) {
+        LocationPowerMode.full => 'Tam mod',
+        LocationPowerMode.low => 'Düşük güç modu',
+        LocationPowerMode.suspended => 'Askıya alındı',
+      };
+      service.setForegroundNotificationInfo(
+        title: 'Klinik Nabız · $modeLabel',
+        content: 'Pil: %$pct',
+      );
+    }
+
+    // On suspension, flag the user as unavailable so dispatch skips
+    // them. We intentionally don't auto-re-enable when battery recovers
+    // — the user must flip the Settings toggle themselves.
+    if (next.mode == LocationPowerMode.suspended) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .set(
+            {
+              'available': false,
+              'autoSuspendedBy': 'low_battery',
+              'updatedAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          );
+        } catch (e) {
+          debugPrint('auto-suspend write failed: $e');
+        }
+      }
+    }
+  }
 
   Future<void> handle(Position pos) async {
+    if (!currentPolicy.shouldTrack) return;
+
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
     final now = DateTime.now();
+    final throttle = Duration(seconds: currentPolicy.throttleSeconds);
+    final distanceGate = currentPolicy.distanceFilterMeters;
     if (lastWrite != null &&
-        now.difference(lastWrite!) < const Duration(seconds: 30) &&
+        now.difference(lastWrite!) < throttle &&
         lastWritten != null &&
         Geolocator.distanceBetween(
               lastWritten!.latitude,
@@ -123,7 +206,7 @@ Future<void> _onStart(ServiceInstance service) async {
               pos.latitude,
               pos.longitude,
             ) <
-            50) {
+            distanceGate) {
       return;
     }
 
@@ -133,13 +216,31 @@ Future<void> _onStart(ServiceInstance service) async {
         'geohash': geohashEncode(pos.latitude, pos.longitude, precision: 7),
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+      // During burst mode, also publish to volunteer_locations so the
+      // operator dashboard can draw a live polyline without polluting
+      // the indexed users collection.
+      if (burstActive) {
+        await FirebaseFirestore.instance
+            .collection('volunteer_locations')
+            .doc(uid)
+            .set(
+          {
+            'uid': uid,
+            'lat': pos.latitude,
+            'lng': pos.longitude,
+            'heading': pos.heading,
+            'updatedAt': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      }
       lastWrite = now;
       lastWritten = pos;
     } catch (e) {
       debugPrint('bg service write failed: $e');
     }
 
-    // Keep the Android foreground notification fresh
+    // Keep the Android foreground notification fresh.
     if (service is AndroidServiceInstance) {
       service.setForegroundNotificationInfo(
         title: 'Klinik Nabız · Aktif',
@@ -148,7 +249,47 @@ Future<void> _onStart(ServiceInstance service) async {
     }
   }
 
-  // Listen for positions at ~30s cadence with distance filter.
+  // Seed the initial policy once Firebase init is guaranteed.
+  await applyBatteryPolicy();
+
+  // Re-check battery every 60 seconds; cheap.
+  final batteryTimer =
+      Timer.periodic(const Duration(seconds: 60), (_) => applyBatteryPolicy());
+
+  // Watch users/{uid}.activeEmergencyId. When it goes non-null the
+  // volunteer just accepted a case — kick into GPS burst mode. When it
+  // clears (case closed / expired) revert to battery policy.
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? activeSub;
+  void wireActiveCaseListener(String uid) {
+    activeSub?.cancel();
+    activeSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
+      final active =
+          (snap.data()?['activeEmergencyId'] as String?)?.isNotEmpty ?? false;
+      if (active == burstActive) return;
+      debugPrint('[bgservice] burst mode → $active');
+      burstActive = active;
+      recomputeEffectivePolicy();
+    });
+  }
+
+  final bootUid = FirebaseAuth.instance.currentUser?.uid;
+  if (bootUid != null) wireActiveCaseListener(bootUid);
+  final authSub = FirebaseAuth.instance.authStateChanges().listen((u) {
+    if (u?.uid != null) {
+      wireActiveCaseListener(u!.uid);
+    } else {
+      activeSub?.cancel();
+      burstActive = false;
+      recomputeEffectivePolicy();
+    }
+  });
+
+  // Listen for positions. Accuracy stays high at the OS level; Firestore
+  // write cadence is throttled via currentPolicy.
   final sub = Geolocator.getPositionStream(
     locationSettings: const LocationSettings(
       accuracy: LocationAccuracy.high,
@@ -162,9 +303,12 @@ Future<void> _onStart(ServiceInstance service) async {
     service.invoke('pong');
   });
 
-  // When service is stopped, cancel the subscription.
+  // When service is stopped, cancel the subscription + timers.
   service.on('stopService').listen((_) {
     sub.cancel();
+    batteryTimer.cancel();
+    activeSub?.cancel();
+    authSub.cancel();
   });
 }
 

@@ -6,7 +6,8 @@ import {
   query,
   limit,
 } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '../lib/firebase';
 
 interface Volunteer {
   id: string;
@@ -16,11 +17,13 @@ interface Volunteer {
   region?: { city?: string; district?: string };
   stats?: { interventions?: number; educationPoints?: number };
   roleLabel?: string;
+  role?: string;
 }
 
 export function Volunteers() {
   const [rows, setRows] = useState<Volunteer[]>([]);
   const [filter, setFilter] = useState('');
+  const [busyUid, setBusyUid] = useState<string | null>(null);
 
   useEffect(() => {
     const q = query(
@@ -48,6 +51,28 @@ export function Volunteers() {
     );
   });
 
+  async function promoteToDispatcher(v: Volunteer) {
+    if (
+      !confirm(
+        `${v.fullName ?? v.id} kullanıcısına dispatcher yetkisi verilsin mi?`,
+      )
+    )
+      return;
+    setBusyUid(v.id);
+    try {
+      const fn = httpsCallable<{ uid: string }, { ok: boolean }>(
+        functions,
+        'assignDispatcherRole',
+      );
+      await fn({ uid: v.id });
+      alert('Yetki verildi. Kullanıcı bir sonraki oturum açışında aktifleşecek.');
+    } catch (e) {
+      alert('Yetki verilemedi: ' + (e as Error).message);
+    } finally {
+      setBusyUid(null);
+    }
+  }
+
   return (
     <div className="p-5 h-screen flex flex-col">
       <header className="mb-4">
@@ -73,6 +98,7 @@ export function Volunteers() {
               <th className="p-3 text-right">Müdahale</th>
               <th className="p-3 text-right">Puan</th>
               <th className="p-3">Durum</th>
+              <th className="p-3 text-right">İşlem</th>
             </tr>
           </thead>
           <tbody>
@@ -84,7 +110,15 @@ export function Volunteers() {
                   {r.region?.city ?? ''}
                   {r.region?.district ? ' / ' + r.region.district : ''}
                 </td>
-                <td className="p-3">{r.roleLabel ?? 'Gönüllü'}</td>
+                <td className="p-3">
+                  {r.role === 'dispatcher' ? (
+                    <span className="text-primary font-semibold">
+                      Dispatcher
+                    </span>
+                  ) : (
+                    (r.roleLabel ?? 'Gönüllü')
+                  )}
+                </td>
                 <td className="p-3 text-right">
                   {r.stats?.interventions ?? 0}
                 </td>
@@ -96,6 +130,17 @@ export function Volunteers() {
                     <span className="text-tertiary font-semibold">Aktif</span>
                   ) : (
                     <span className="text-onsurface-variant">Pasif</span>
+                  )}
+                </td>
+                <td className="p-3 text-right">
+                  {r.role !== 'dispatcher' && (
+                    <button
+                      disabled={busyUid === r.id}
+                      onClick={() => promoteToDispatcher(r)}
+                      className="text-xs px-2 py-1 rounded-md border border-primary/40 text-primary hover:bg-primary/10 disabled:opacity-40"
+                    >
+                      Dispatcher yap
+                    </button>
                   )}
                 </td>
               </tr>

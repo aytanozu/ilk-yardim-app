@@ -3,6 +3,8 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../observability/breadcrumbs.dart';
+
 /// Opens the platform's default turn-by-turn navigation app pointing at the
 /// given coordinate. Prefers Google Maps if installed (walking mode by
 /// default), falls back to the generic `geo:` intent on Android / Apple
@@ -15,6 +17,7 @@ class NavLauncher {
     required double lng,
     String? label,
   }) async {
+    breadcrumb('nav_launch', {'lat': lat, 'lng': lng, 'label': label});
     final l = label != null ? '(${Uri.encodeComponent(label)})' : '';
     if (Platform.isAndroid) {
       // Google Maps navigation intent — walking mode.
