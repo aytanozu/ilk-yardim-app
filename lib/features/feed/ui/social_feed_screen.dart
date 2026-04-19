@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/theme/app_colors.dart';
@@ -7,6 +8,7 @@ import '../../../core/theme/app_typography.dart';
 import '../../../shared/widgets/primary_gradient_button.dart';
 import '../providers/feed_provider.dart';
 import '../widgets/post_card.dart';
+import 'comments_sheet.dart';
 
 class SocialFeedScreen extends StatelessWidget {
   const SocialFeedScreen({super.key});
@@ -68,6 +70,8 @@ class _FeedBody extends StatelessWidget {
                     liked: liked,
                     onLikeTap: () =>
                         ctx.read<FeedProvider>().toggleLike(posts[i].id),
+                    onCommentTap: () =>
+                        CommentsSheet.show(ctx, posts[i].id as String),
                   ),
                 ),
               ),
@@ -80,7 +84,7 @@ class _FeedBody extends StatelessWidget {
           label: 'Hikayeni Paylaş',
           icon: Icons.edit_rounded,
           expanded: false,
-          onPressed: () {},
+          onPressed: () => context.push('/feed/new'),
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,

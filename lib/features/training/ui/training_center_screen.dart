@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -61,7 +62,11 @@ class _TrainingCenterScreenState extends State<TrainingCenterScreen> {
                       return _placeholderBanner();
                     }
                     if (snap.data == null) return _placeholderBanner();
-                    return DailyCard(item: snap.data!, onTap: () {});
+                    final item = snap.data!;
+                    return DailyCard(
+                      item: item,
+                      onTap: () => context.push('/training/item/${item.id}'),
+                    );
                   },
                 ),
                 const SizedBox(height: AppSpacing.lg),
@@ -71,7 +76,10 @@ class _TrainingCenterScreenState extends State<TrainingCenterScreen> {
                       .copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                CategoryGrid(onSelect: (_) {}),
+                CategoryGrid(
+                  onSelect: (cat) =>
+                      context.push('/training/category/${cat.key}'),
+                ),
                 const SizedBox(height: AppSpacing.lg),
                 SectionHeader(
                   title: 'Popüler Videolar',
@@ -90,7 +98,11 @@ class _TrainingCenterScreenState extends State<TrainingCenterScreen> {
                         itemCount: items.length,
                         separatorBuilder: (_, __) =>
                             const SizedBox(width: AppSpacing.sm),
-                        itemBuilder: (_, i) => VideoCard(item: items[i]),
+                        itemBuilder: (ctx, i) => VideoCard(
+                          item: items[i],
+                          onTap: () => ctx
+                              .push('/training/item/${items[i].id}'),
+                        ),
                       );
                     },
                   ),

@@ -24,14 +24,17 @@ export async function reverseGeocode(
   if (!res.ok) return null;
   const data = await res.json();
   const addr = data?.address ?? {};
+  // Türkiye Nominatim hiyerarşisi (genellikle):
+  //  - addr.province  → İl (İstanbul, Ankara…)
+  //  - addr.city/town → İlçe (Kadıköy, Çankaya…)
+  //  - addr.suburb    → Mahalle (Caferağa, Bahçelievler…)
+  // Province yoksa state ya da ilk uygun alan fallback.
   return {
     lat,
     lng,
     display: data.display_name ?? '',
-    city:
-      addr.city ?? addr.town ?? addr.state ?? addr.province,
-    district:
-      addr.suburb ?? addr.county ?? addr.district ?? addr.neighbourhood,
+    city: addr.province ?? addr.state ?? addr.region,
+    district: addr.city ?? addr.town ?? addr.county ?? addr.district,
   };
 }
 

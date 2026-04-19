@@ -41,6 +41,8 @@ interface FormData {
   patientBreathing: string;
   contactPhone: string;
   hazards: string[];
+  regionCity: string;
+  regionDistrict: string;
 }
 
 export function NewEmergency() {
@@ -64,6 +66,8 @@ export function NewEmergency() {
       patientBreathing: '',
       contactPhone: '',
       hazards: [],
+      regionCity: 'istanbul',
+      regionDistrict: 'kadikoy',
     },
   });
 
@@ -79,6 +83,8 @@ export function NewEmergency() {
       if (active && g) {
         setGeo(g);
         if (!addr || addr.length === 0) setValue('address', g.display);
+        if (g.city) setValue('regionCity', slugifyRegion(g.city));
+        if (g.district) setValue('regionDistrict', slugifyRegion(g.district));
       }
     })();
     return () => {
@@ -108,8 +114,14 @@ export function NewEmergency() {
       setErr(null);
       setSubmitting(true);
       try {
-        const city = slugifyRegion(geo?.city ?? 'istanbul');
-        const district = slugifyRegion(geo?.district ?? 'kadikoy');
+        // Prefer the explicit form values (dispatcher can override); fall back
+        // to Nominatim's parse; final fallback istanbul/kadikoy.
+        const city = slugifyRegion(
+          (data.regionCity || geo?.city || 'istanbul').trim(),
+        );
+        const district = slugifyRegion(
+          (data.regionDistrict || geo?.district || 'kadikoy').trim(),
+        );
 
         await addDoc(collection(db, 'emergencies'), {
           type: data.type,
@@ -340,17 +352,35 @@ export function NewEmergency() {
             {pin ? (
               <div className="mt-1">
                 {pin.lat.toFixed(5)}, {pin.lng.toFixed(5)}
-                {geo?.city && (
-                  <span className="ml-2 text-onsurface-variant">
-                    · {geo.city} / {geo.district ?? '—'}
-                  </span>
-                )}
               </div>
             ) : (
               <div className="mt-1 text-onsurface-variant">
                 Haritaya tıklayarak pin bırakın
               </div>
             )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label-field">İl (city)</label>
+              <input
+                className="input-field"
+                placeholder="istanbul"
+                {...register('regionCity', { required: true })}
+              />
+            </div>
+            <div>
+              <label className="label-field">İlçe (district)</label>
+              <input
+                className="input-field"
+                placeholder="kadikoy"
+                {...register('regionDistrict', { required: true })}
+              />
+            </div>
+          </div>
+          <div className="text-xs text-onsurface-variant -mt-2">
+            Küçük harf, boşluksuz, Türkçesiz (ı→i, ş→s). Mobil uygulama bu
+            alanlara göre gönüllüleri filtreler.
           </div>
 
           {err && <div className="text-error text-sm">{err}</div>}

@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import 'core/config/remote_config_service.dart';
 import 'core/firebase/firebase_bootstrap.dart';
+import 'core/location/background_service_runner.dart';
 import 'core/location/location_provider.dart';
 import 'core/notifications/fcm_service.dart';
 import 'core/router/app_router.dart';
@@ -25,9 +26,12 @@ Future<void> main() async {
 
   final firebaseReady = await FirebaseBootstrap.init();
   if (firebaseReady) {
+    registerBackgroundMessageHandler();
     await AppRemoteConfig.instance.init();
     // Fire-and-forget — FCM registers tokens after auth.
     unawaited(FcmService.instance.init());
+    // Prepare native foreground service (survives app kill).
+    await BackgroundServiceRunner.instance.configure();
   }
 
   runApp(const IlkYardimApp());

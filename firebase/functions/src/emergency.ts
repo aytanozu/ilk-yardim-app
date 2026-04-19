@@ -115,7 +115,7 @@ function buildFcmMessage(
       payload: {
         aps: {
           sound: isCritical
-            ? { critical: 1, name: 'default', volume: 1.0 }
+            ? { critical: true, name: 'default', volume: 1.0 }
             : 'default',
           'interruption-level': isCritical ? 'critical' : 'time-sensitive',
           badge: 1,
@@ -193,6 +193,10 @@ export const onEmergencyCreate = onDocumentCreated(
       failure: res.failureCount,
     });
 
+    // Clean stale/invalid tokens across user docs so subsequent waves
+    // don't keep targeting dead endpoints.
+    await _pruneFailedTokens(recipients, allTokens, res);
+
     await snap.ref.update({
       waveLevel: 0,
       notifiedUids: recipients.map((r) => r.uid),
@@ -200,6 +204,44 @@ export const onEmergencyCreate = onDocumentCreated(
     });
   },
 );
+
+async function _pruneFailedTokens(
+  recipients: Array<{ uid: string; tokens: string[]; distance: number }>,
+  allTokens: string[],
+  res: admin.messaging.BatchResponse,
+): Promise<void> {
+  const doomedCodes = new Set([
+    'messaging/invalid-registration-token',
+    'messaging/registration-token-not-registered',
+  ]);
+  const doomedTokens: string[] = [];
+  res.responses.forEach((r, i) => {
+    if (!r.success && r.error && doomedCodes.has(r.error.code)) {
+      doomedTokens.push(allTokens[i]);
+    }
+  });
+  if (doomedTokens.length === 0) return;
+
+  logger.info('Pruning stale tokens', { count: doomedTokens.length });
+  const db = admin.firestore();
+  const tokenOwners = new Map<string, string[]>();
+  for (const rec of recipients) {
+    for (const t of rec.tokens) {
+      if (doomedTokens.includes(t)) {
+        const arr = tokenOwners.get(rec.uid) ?? [];
+        arr.push(t);
+        tokenOwners.set(rec.uid, arr);
+      }
+    }
+  }
+  const batch = db.batch();
+  for (const [uid, tokens] of tokenOwners.entries()) {
+    batch.update(db.collection('users').doc(uid), {
+      fcmTokens: admin.firestore.FieldValue.arrayRemove(...tokens),
+    });
+  }
+  await batch.commit();
+}
 
 /**
  * Atomically claims an emergency. First-come-first-served.

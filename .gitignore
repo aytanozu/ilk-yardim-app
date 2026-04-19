@@ -21,6 +21,9 @@ migrate_working_dir/
 # VS Code
 .vscode/
 
+# Claude Code local plans
+.claude/
+
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id
@@ -46,7 +49,9 @@ app.*.map.json
 # Firebase / Google services (do NOT commit)
 **/google-services.json
 **/GoogleService-Info.plist
-.firebaserc
+**/*firebase-adminsdk*.json
+**/*-serviceaccount*.json
+**/service-account*.json
 .firebase/
 firebase-debug.log
 

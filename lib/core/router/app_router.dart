@@ -6,21 +6,26 @@ import '../../features/auth/providers/auth_provider.dart';
 import '../../features/auth/ui/not_certified_screen.dart';
 import '../../features/auth/ui/otp_verify_screen.dart';
 import '../../features/auth/ui/phone_entry_screen.dart';
+import '../../features/emergency/ui/emergency_detail_screen.dart';
 import '../../features/emergency/ui/emergency_map_screen.dart';
+import '../../features/feed/ui/create_post_screen.dart';
 import '../../features/feed/ui/social_feed_screen.dart';
 import '../../features/onboarding/ui/consent_screen.dart';
 import '../../features/onboarding/ui/splash_screen.dart';
 import '../../features/profile/ui/profile_screen.dart';
 import '../../features/quiz/ui/quiz_screen.dart';
+import '../../features/training/ui/training_category_screen.dart';
 import '../../features/training/ui/training_center_screen.dart';
+import '../../features/training/ui/training_detail_screen.dart';
 import '../../shared/widgets/app_scaffold.dart';
+import 'navigator_keys.dart';
 
 class AppRouter {
   AppRouter._();
 
   static GoRouter build(AuthProvider auth) {
-    final shellKey = GlobalKey<NavigatorState>();
     return GoRouter(
+      navigatorKey: rootNavigatorKey,
       initialLocation: '/splash',
       refreshListenable: auth,
       redirect: (context, state) {
@@ -29,6 +34,12 @@ class AppRouter {
 
         // Consent screen is a hard stop — never auto-redirect away from it.
         if (path == '/consent') return null;
+        // Emergency detail is a deep-link destination — allow even when
+        // stage is still resolving, as long as we're authenticated.
+        if (path.startsWith('/emergency/') &&
+            stage == AuthStage.authenticated) {
+          return null;
+        }
 
         if (stage == AuthStage.unknown) {
           return path == '/splash' ? null : '/splash';
@@ -54,6 +65,7 @@ class AppRouter {
           builder: (context, __) => ConsentScreen(
             onAccepted: () {
               context.read<AuthProvider>().resetToPhoneEntry();
+              context.go('/auth/phone');
             },
           ),
         ),
@@ -69,8 +81,14 @@ class AppRouter {
           path: '/auth/not-certified',
           builder: (_, __) => const NotCertifiedScreen(),
         ),
+        // Full-screen emergency detail — opened from push tap / deep link.
+        GoRoute(
+          path: '/emergency/:id',
+          builder: (context, state) => EmergencyDetailScreen(
+            emergencyId: state.pathParameters['id']!,
+          ),
+        ),
         StatefulShellRoute.indexedStack(
-          parentNavigatorKey: shellKey,
           builder: (context, state, shell) =>
               AppShellScaffold(navigationShell: shell),
           branches: [
@@ -105,6 +123,20 @@ class AppRouter {
           builder: (context, state) => QuizScreen(
             quizId: state.pathParameters['id']!,
           ),
+        ),
+        GoRoute(
+          path: '/feed/new',
+          builder: (_, __) => const CreatePostScreen(),
+        ),
+        GoRoute(
+          path: '/training/item/:id',
+          builder: (context, state) =>
+              TrainingDetailScreen(itemId: state.pathParameters['id']!),
+        ),
+        GoRoute(
+          path: '/training/category/:key',
+          builder: (context, state) =>
+              TrainingCategoryScreen(categoryKey: state.pathParameters['key']!),
         ),
       ],
     );

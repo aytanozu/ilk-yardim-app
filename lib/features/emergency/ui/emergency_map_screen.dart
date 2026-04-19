@@ -1,10 +1,10 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/location/location_provider.dart';
-import '../../../core/location/user_location_sync.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
@@ -13,6 +13,7 @@ import '../../../shared/widgets/glass_fab.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../data/emergency_repo.dart';
 import '../data/routing_service.dart';
+import '../providers/accepted_case_notifier.dart';
 import '../widgets/emergency_alert_card.dart';
 
 class EmergencyMapScreen extends StatefulWidget {
@@ -30,22 +31,53 @@ class _EmergencyMapScreenState extends State<EmergencyMapScreen> {
   EmergencyCase? _selected;
   RouteResult? _route;
   bool _accepting = false;
-  UserLocationSync? _sync;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final provider = context.read<LocationProvider>();
-      await provider.start(requestAlways: true);
-      _sync = UserLocationSync(provider: provider)..start();
+      await context.read<LocationProvider>().start(requestAlways: true);
+      _autoSelectAcceptedCase();
     });
+    AcceptedCaseNotifier.instance.addListener(_autoSelectAcceptedCase);
   }
 
   @override
   void dispose() {
-    _sync?.stop();
+    AcceptedCaseNotifier.instance.removeListener(_autoSelectAcceptedCase);
     super.dispose();
+  }
+
+  Future<void> _autoSelectAcceptedCase() async {
+    final id = AcceptedCaseNotifier.instance.value;
+    if (id == null) return;
+    AcceptedCaseNotifier.instance.clear(); // one-shot
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('emergencies')
+          .doc(id)
+          .get();
+      if (!snap.exists) return;
+      final c = EmergencyCase.fromSnapshot(snap);
+      if (!mounted) return;
+      setState(() => _selected = c);
+
+      final loc = context.read<LocationProvider>().latLng;
+      if (loc == null) return;
+      final target = LatLng(c.location.latitude, c.location.longitude);
+      final route = await _router.route(from: loc, to: target);
+      if (!mounted || route == null) return;
+      setState(() => _route = route);
+      _mapController.fitCamera(
+        CameraFit.coordinates(
+          coordinates: [loc, target],
+          padding: const EdgeInsets.all(72),
+        ),
+      );
+    } catch (e) {
+      debugPrint('autoSelectAcceptedCase failed: $e');
+    }
   }
 
   Future<void> _onAccept(EmergencyCase e) async {

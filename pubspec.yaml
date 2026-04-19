@@ -47,6 +47,14 @@ dependencies:
   # notifications
   flutter_local_notifications: ^18.0.1
 
+  # media + background
+  image_picker: ^1.1.2
+  flutter_background_service: ^5.1.0
+  flutter_background_service_android: ^6.3.0
+
+  # deep links to native nav apps
+  url_launcher: ^6.3.1
+
   # utils
   intl: ^0.20.2
   permission_handler: ^11.3.1

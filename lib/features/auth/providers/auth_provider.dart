@@ -2,7 +2,10 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
 
+import '../../../core/location/background_service_runner.dart';
+import '../../../core/notifications/fcm_service.dart';
 import '../../../shared/models/user_profile.dart';
 import '../data/auth_repo.dart';
 
@@ -46,6 +49,7 @@ class AuthProvider extends ChangeNotifier {
           _stage != AuthStage.notCertified) {
         _stage = AuthStage.phoneEntry;
       }
+      BackgroundServiceRunner.instance.stop();
     } else {
       _profileSub?.cancel();
       _profileSub = _repo.watchProfile(user.uid).listen((p) {
@@ -55,8 +59,41 @@ class AuthProvider extends ChangeNotifier {
         }
         notifyListeners();
       });
+      FcmService.instance.registerForCurrentUser();
+      _ensureLocationAndStartService();
     }
     notifyListeners();
+  }
+
+  /// Requests location permission up to "Always" then boots the native
+  /// foreground service so tracking persists across app-kill / reboot.
+  Future<void> _ensureLocationAndStartService() async {
+    debugPrint('[bgservice] ensureLocationAndStartService entered');
+    try {
+      // Use permission_handler (awaits the dialog reliably, unlike some
+      // Geolocator builds on Android 15 emulator which never resolve).
+      var status = await Permission.location.status;
+      debugPrint('[bgservice] initial location status=$status');
+      if (!status.isGranted) {
+        status = await Permission.location.request();
+        debugPrint('[bgservice] after request location status=$status');
+      }
+      if (!status.isGranted) {
+        debugPrint('[bgservice] location NOT granted — skipping service start');
+        return;
+      }
+      // Try to upgrade to Always (background). Android shows a second dialog
+      // only if foreground is already granted.
+      if (!await Permission.locationAlways.isGranted) {
+        final bg = await Permission.locationAlways.request();
+        debugPrint('[bgservice] locationAlways status=$bg');
+      }
+
+      debugPrint('[bgservice] calling start()');
+      await BackgroundServiceRunner.instance.start();
+    } catch (e, s) {
+      debugPrint('[bgservice] ensureLocationAndStartService EXCEPTION: $e\n$s');
+    }
   }
 
   Future<void> submitPhone(String phoneE164) async {
@@ -112,7 +149,6 @@ class AuthProvider extends ChangeNotifier {
   Future<void> _finalize() async {
     try {
       await _repo.finalizeSignup();
-      // Force ID token refresh so custom claim arrives
       await FirebaseAuth.instance.currentUser?.getIdToken(true);
     } catch (e) {
       debugPrint('finalize error: $e');

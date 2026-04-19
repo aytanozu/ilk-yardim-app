@@ -68,23 +68,28 @@ export const bulkImportCertifiedPhones = onCall(
 
 /**
  * One-off HTTP endpoint protected by env SUPERADMIN_TOKEN to assign
- * dispatcher role. Use: curl -H "x-superadmin-token: $T" ...
+ * dispatcher role. Re-enable once Secret Manager API is active and
+ * SUPERADMIN_TOKEN is set via `firebase functions:secrets:set`.
+ *
+ * Until then, use scripts/assignDispatcher.ts locally with a service
+ * account JSON to set the custom claim manually.
  */
-export const assignDispatcherRole = onRequest(
-  { region: REGION, secrets: ['SUPERADMIN_TOKEN'] },
-  async (req, res) => {
-    const token = process.env.SUPERADMIN_TOKEN;
-    if (!token || req.get('x-superadmin-token') !== token) {
-      res.status(403).send('forbidden');
-      return;
-    }
-    const uid = req.body?.uid as string | undefined;
-    if (!uid) {
-      res.status(400).send('uid required');
-      return;
-    }
-    await admin.auth().setCustomUserClaims(uid, { role: 'dispatcher' });
-    logger.info('dispatcher claim set', { uid });
-    res.status(200).send({ ok: true });
-  },
-);
+// export const assignDispatcherRole = onRequest(
+//   { region: REGION, secrets: ['SUPERADMIN_TOKEN'] },
+//   async (req, res) => {
+//     const token = process.env.SUPERADMIN_TOKEN;
+//     if (!token || req.get('x-superadmin-token') !== token) {
+//       res.status(403).send('forbidden');
+//       return;
+//     }
+//     const uid = req.body?.uid as string | undefined;
+//     if (!uid) {
+//       res.status(400).send('uid required');
+//       return;
+//     }
+//     await admin.auth().setCustomUserClaims(uid, { role: 'dispatcher' });
+//     logger.info('dispatcher claim set', { uid });
+//     res.status(200).send({ ok: true });
+//   },
+// );
+void onRequest; // keep import active

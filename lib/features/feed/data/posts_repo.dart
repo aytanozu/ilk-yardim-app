@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../../../shared/models/comment.dart';
 import '../../../shared/models/post.dart';
 
 class PostsRepo {
@@ -70,6 +71,40 @@ class PostsRepo {
       'likeCount': 0,
       'commentCount': 0,
       'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Stream<List<Comment>> watchComments(String postId, {int limit = 100}) {
+    return _firestore
+        .collection('posts')
+        .doc(postId)
+        .collection('comments')
+        .orderBy('createdAt', descending: false)
+        .limit(limit)
+        .snapshots()
+        .map((s) => s.docs.map(Comment.fromSnapshot).toList());
+  }
+
+  Future<void> addComment({
+    required String postId,
+    required String authorId,
+    required String authorName,
+    String? authorAvatarUrl,
+    required String text,
+  }) async {
+    final postRef = _firestore.collection('posts').doc(postId);
+    final commentRef = postRef.collection('comments').doc();
+    await _firestore.runTransaction((tx) async {
+      tx.set(commentRef, {
+        'authorId': authorId,
+        'authorName': authorName,
+        'authorAvatarUrl': authorAvatarUrl,
+        'text': text,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      tx.update(postRef, {
+        'commentCount': FieldValue.increment(1),
+      });
     });
   }
 }

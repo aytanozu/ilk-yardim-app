@@ -11,14 +11,17 @@ export default {
           container: '#db313f',
           fixed: '#ffdad8',
         },
+        onprimary: '#ffffff',
         secondary: {
           DEFAULT: '#485f84',
           container: '#bbd3fd',
         },
+        onsecondary: '#ffffff',
         tertiary: {
           DEFAULT: '#006860',
           container: '#008379',
         },
+        ontertiary: '#ffffff',
         surface: {
           DEFAULT: '#f3fcf0',
           low: '#edf6ea',
@@ -37,6 +40,7 @@ export default {
           minor: '#006860',
         },
         error: '#ba1a1a',
+        onerror: '#ffffff',
       },
       borderRadius: {
         xl: '24px',

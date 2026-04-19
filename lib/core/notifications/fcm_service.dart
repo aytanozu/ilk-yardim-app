@@ -5,9 +5,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:go_router/go_router.dart';
 
-/// Handles FCM registration, token persistence, topic subscriptions, and
-/// foreground local notifications for critical alerts.
+import '../router/navigator_keys.dart';
+
+/// Handles FCM registration, token persistence, topic subscriptions,
+/// foreground local notifications for critical alerts, and deep-linking
+/// on notification tap (cold start, background, foreground).
 class FcmService {
   FcmService._();
   static final FcmService instance = FcmService._();
@@ -28,15 +32,23 @@ class FcmService {
         provisional: false,
       );
 
-      // Android 13+ POST_NOTIFICATIONS runtime prompt handled elsewhere via
-      // permission_handler.
       await _initLocalNotifications();
 
+      // Foreground: show local notif (critical channel with fullScreenIntent).
       FirebaseMessaging.onMessage.listen(_handleForeground);
-      FirebaseMessaging.onBackgroundMessage(_backgroundHandler);
+      // Background → user taps system notif → app comes to fg with message.
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleTap);
+      // Killed → user taps notif to launch; message arrives here.
+      final initial = await FirebaseMessaging.instance.getInitialMessage();
+      if (initial != null) {
+        // Delay briefly so router is ready after first frame.
+        Future<void>.delayed(const Duration(milliseconds: 600), () {
+          _handleTap(initial);
+        });
+      }
 
       await _registerToken();
-      FirebaseMessaging.instance.onTokenRefresh.listen((t) => _saveToken(t));
+      FirebaseMessaging.instance.onTokenRefresh.listen(_saveToken);
     } catch (e) {
       debugPrint('FCM init failed: $e');
     }
@@ -52,18 +64,26 @@ class FcmService {
     );
     await _local.initialize(
       const InitializationSettings(android: androidInit, iOS: iosInit),
+      onDidReceiveNotificationResponse: _onLocalNotificationTap,
     );
 
-    // Channels
     if (!kIsWeb && Platform.isAndroid) {
       final android =
           _local.resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>();
+
+      // Ask for notification permission (Android 13+).
+      await android?.requestNotificationsPermission();
+      // Ask for full-screen intent (Android 14+ — required for lock-screen wake).
+      await android?.requestFullScreenIntentPermission();
+      // Ask for exact alarm permission (used by scheduler in FLN 18+).
+      await android?.requestExactAlarmsPermission();
+
       await android?.createNotificationChannel(
         const AndroidNotificationChannel(
           'critical_alert',
           'Kritik Acil Çağrı',
-          description: 'Hayati tehlike çağrıları',
+          description: 'Hayati tehlike çağrıları — tam ekran uyarı',
           importance: Importance.max,
           enableVibration: true,
           playSound: true,
@@ -83,16 +103,24 @@ class FcmService {
   }
 
   void _handleForeground(RemoteMessage message) {
-    final notif = message.notification;
-    if (notif == null) return;
-
+    final id = message.data['emergencyId'] as String?;
     final isCritical = message.data['severity'] == 'critical';
     final channel = isCritical ? 'critical_alert' : 'new_call';
+    final title = message.notification?.title ??
+        (isCritical ? 'ACİL ÇAĞRI' : 'Yeni Çağrı');
+    final body = message.notification?.body ?? 'Yakınınızda yeni bir vaka';
+
+    // Critical: skip local notif and deep-link directly — we want to
+    // preempt whatever screen the user is on.
+    if (isCritical && id != null) {
+      _navigateToEmergency(id);
+      return;
+    }
 
     _local.show(
       message.messageId.hashCode,
-      notif.title,
-      notif.body,
+      title,
+      body,
       NotificationDetails(
         android: AndroidNotificationDetails(
           channel,
@@ -104,22 +132,52 @@ class FcmService {
           playSound: true,
           enableVibration: true,
           ticker: 'Yeni acil çağrı',
+          visibility: NotificationVisibility.public,
         ),
         iOS: DarwinNotificationDetails(
-          interruptionLevel:
-              isCritical ? InterruptionLevel.critical : InterruptionLevel.timeSensitive,
+          interruptionLevel: isCritical
+              ? InterruptionLevel.critical
+              : InterruptionLevel.timeSensitive,
           presentAlert: true,
           presentBadge: true,
           presentSound: true,
         ),
       ),
-      payload: message.data['emergencyId'] as String?,
+      payload: id,
     );
+  }
+
+  void _handleTap(RemoteMessage message) {
+    final id = message.data['emergencyId'] as String?;
+    if (id != null) _navigateToEmergency(id);
+  }
+
+  void _onLocalNotificationTap(NotificationResponse response) {
+    final id = response.payload;
+    if (id != null && id.isNotEmpty) _navigateToEmergency(id);
+  }
+
+  void _navigateToEmergency(String id) {
+    // Use rootNavigatorKey's context so we can route even when the call
+    // originates outside the widget tree (bg handler, initial message).
+    final ctx = rootNavigatorKey.currentContext;
+    if (ctx == null) return;
+    ctx.go('/emergency/$id');
   }
 
   Future<void> _registerToken() async {
     final token = await FirebaseMessaging.instance.getToken();
     if (token != null) await _saveToken(token);
+  }
+
+  /// Called by auth provider once user is authenticated so the token that
+  /// was fetched pre-auth gets attached to their profile.
+  Future<void> registerForCurrentUser() async {
+    try {
+      await _registerToken();
+    } catch (e) {
+      debugPrint('registerForCurrentUser: $e');
+    }
   }
 
   Future<void> _saveToken(String token) async {
@@ -146,6 +204,13 @@ class FcmService {
 }
 
 @pragma('vm:entry-point')
-Future<void> _backgroundHandler(RemoteMessage message) async {
-  debugPrint('bg message: ${message.messageId}');
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Lightweight — the OS already shows the system notification on bg push.
+  // No UI navigation possible here (no Flutter engine running).
+  debugPrint('bg push id=${message.data["emergencyId"]}');
+}
+
+/// Call from main() before runApp to register the bg handler.
+void registerBackgroundMessageHandler() {
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 }

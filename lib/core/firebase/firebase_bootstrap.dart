@@ -27,15 +27,20 @@ class FirebaseBootstrap {
       return false;
     }
 
-    try {
-      await FirebaseAppCheck.instance.activate(
-        androidProvider:
-            kReleaseMode ? AndroidProvider.playIntegrity : AndroidProvider.debug,
-        appleProvider:
-            kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug,
-      );
-    } catch (e) {
-      debugPrint('App Check activation failed: $e');
+    // App Check — only activate in release builds. In debug/MVP the
+    // Firebase App Check API is often not yet enabled, which causes
+    // 403 noise and placeholder-token retries. Skipping activate() is
+    // safe: when Functions/Firestore don't enforce App Check, clients
+    // simply don't attach tokens.
+    if (kReleaseMode) {
+      try {
+        await FirebaseAppCheck.instance.activate(
+          androidProvider: AndroidProvider.playIntegrity,
+          appleProvider: AppleProvider.appAttest,
+        );
+      } catch (e) {
+        debugPrint('App Check activation failed: $e');
+      }
     }
 
     if (!kIsWeb) {
