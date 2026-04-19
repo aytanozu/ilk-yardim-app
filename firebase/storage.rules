@@ -1,0 +1,33 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() { return request.auth != null; }
+    function isCertified() {
+      return isSignedIn() && request.auth.token.certified == true;
+    }
+    function isSelf(uid) { return isSignedIn() && request.auth.uid == uid; }
+
+    // Post images — author only
+    match /posts/{uid}/{file} {
+      allow read: if isCertified();
+      allow write: if isSelf(uid) && isCertified()
+                   && request.resource.size < 5 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Avatars
+    match /avatars/{uid}/{file} {
+      allow read: if true;
+      allow write: if isSelf(uid)
+                   && request.resource.size < 2 * 1024 * 1024
+                   && request.resource.contentType.matches('image/.*');
+    }
+
+    // Training videos — admin (server) only
+    match /training/{file} {
+      allow read: if isCertified();
+      allow write: if false;
+    }
+  }
+}

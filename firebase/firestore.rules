@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isCertified() {
+      return isSignedIn() && request.auth.token.certified == true;
+    }
+
+    function isDispatcher() {
+      return isSignedIn() && request.auth.token.role == 'dispatcher';
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // Certified phones — only server (Cloud Functions) writes.
+    // Client can't read or list; all validation via callable.
+    match /certified_phones/{phone} {
+      allow read, write: if false;
+    }
+
+    // Users: owner read/write, certified gate.
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isDispatcher();
+      allow create: if isSelf(uid);
+      allow update: if (isSelf(uid) && isCertified())
+                    || isDispatcher();
+      allow delete: if isDispatcher();
+    }
+
+    // Emergencies: certified users read open cases in their region;
+    // create only by dispatcher; accept via callable transaction.
+    match /emergencies/{id} {
+      allow read: if isCertified() || isDispatcher();
+      allow create: if isDispatcher();
+      allow update: if isDispatcher()
+                    || (isCertified() &&
+                        request.resource.data.acceptedBy == request.auth.uid &&
+                        resource.data.status == 'open');
+      allow delete: if isDispatcher();
+    }
+
+    // Posts: certified user read; author-only write; like count via Cloud Function.
+    match /posts/{id} {
+      allow read: if isCertified();
+      allow create: if isCertified() &&
+                    request.resource.data.authorId == request.auth.uid;
+      allow update: if (isCertified() && resource.data.authorId == request.auth.uid)
+                    || isDispatcher();
+      allow delete: if (isCertified() && resource.data.authorId == request.auth.uid)
+                    || isDispatcher();
+
+      match /comments/{cid} {
+        allow read: if isCertified();
+        allow create: if isCertified() &&
+                      request.resource.data.authorId == request.auth.uid;
+        allow update, delete: if (isCertified() &&
+                               resource.data.authorId == request.auth.uid)
+                              || isDispatcher();
+      }
+
+      match /likes/{uid} {
+        allow read: if isCertified();
+        allow write: if isCertified() && request.auth.uid == uid;
+      }
+    }
+
+    // Training content — certified read, dispatcher write.
+    match /training_items/{id} {
+      allow read: if isCertified();
+      allow write: if isDispatcher();
+    }
+
+    // Quizzes
+    match /quizzes/{id} {
+      allow read: if isCertified();
+      allow write: if isDispatcher();
+
+      match /questions/{qid} {
+        allow read: if isCertified();
+        allow write: if isDispatcher();
+      }
+    }
+
+    // Quiz attempts — owner only.
+    match /quiz_attempts/{aid} {
+      allow read, write: if isCertified() &&
+                         request.resource.data.uid == request.auth.uid;
+    }
+
+    // Audit log — dispatcher read only; server write.
+    match /audit_log/{id} {
+      allow read: if isDispatcher();
+      allow write: if false;
+    }
+
+    // Waitlist — users awaiting region activation
+    match /waitlist/{uid} {
+      allow read: if isSelf(uid) || isDispatcher();
+      allow create, update: if isSelf(uid);
+      allow delete: if isDispatcher();
+    }
+  }
+}

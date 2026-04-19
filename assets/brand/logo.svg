@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Klinik Nabız logo">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#B7102A"/>
+      <stop offset="100%" stop-color="#DB313F"/>
+    </linearGradient>
+  </defs>
+  <!-- Pin drop shape -->
+  <path fill="url(#g)"
+    d="M64 8c-22 0-40 17.8-40 39.7 0 27.5 35.1 65.9 37.3 68.3a3.6 3.6 0 0 0 5.4 0C69 113.6 104 75.2 104 47.7 104 25.8 86 8 64 8z"/>
+  <!-- EKG pulse line (white) -->
+  <path fill="none" stroke="#FFFFFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"
+    d="M30 56 L48 56 L54 42 L64 72 L74 50 L82 56 L98 56"/>
+</svg>
